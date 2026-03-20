@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cloistr Whiteboard</title>
+    <meta name="description" content="Collaborative whiteboard powered by Nostr and Excalidraw" />
+    <style>
+      /* Prevent flash of unstyled content */
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100vh;
+        overflow: hidden;
+        font-family: system-ui, -apple-system, sans-serif;
+      }
+
+      #root {
+        height: 100vh;
+        width: 100vw;
+      }
+
+      /* Loading state */
+      .loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        font-size: 1.2rem;
+        color: #666;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="loading">Loading Cloistr Whiteboard...</div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
