@@ -60,12 +60,18 @@ function createLocalSigner(privateKey: Uint8Array): SignerInterface {
   }
 }
 
+function getDocumentId(): string {
+  const params = new URLSearchParams(window.location.search)
+  return params.get('docId') || 'demo-whiteboard'
+}
+
 function App() {
   const [authConfig, setAuthConfig] = useState<{
     relayUrl: string
     signer: SignerInterface
     publicKey: string
   } | null>(null)
+  const [documentId] = useState(getDocumentId)
 
   useEffect(() => {
     // Generate a session key for demo purposes
@@ -110,7 +116,7 @@ function App() {
             {nip19.npubEncode(authConfig.publicKey).slice(0, 20)}...
           </span>
         </header>
-        <Whiteboard documentId="demo-whiteboard" />
+        <Whiteboard documentId={documentId} />
       </div>
     </AuthProvider>
   )

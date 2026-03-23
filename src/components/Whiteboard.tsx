@@ -3,8 +3,10 @@ import { Excalidraw, MainMenu, WelcomeScreen } from '@excalidraw/excalidraw'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types/types'
 import * as Y from 'yjs'
 import { ExcalidrawBinding, yjsToExcalidraw } from 'y-excalidraw'
-import { NostrSyncProvider } from '@cloistr/collab-common'
+import { NostrSyncProvider, useDocumentPersistence } from '@cloistr/collab-common'
 import { useNostrAuth } from '../App'
+
+const BLOSSOM_URL = 'https://files.cloistr.xyz'
 
 interface WhiteboardProps {
   documentId: string
@@ -56,6 +58,29 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId }) => {
       providerRef.current = null
     }
   }, [documentId, ydoc, signer, relayUrl])
+
+  // Document persistence via Blossom
+  const [persistenceState, persistenceControls] = useDocumentPersistence(
+    ydoc,
+    {
+      documentId,
+      blossomUrl: BLOSSOM_URL,
+      relayUrl,
+      signer,
+    },
+    {
+      autoLoad: true,
+      autoSaveInterval: 60000,
+    }
+  )
+
+  const handleSave = useCallback(async () => {
+    try {
+      await persistenceControls.save()
+    } catch (error) {
+      console.error('[Whiteboard] Save failed:', error)
+    }
+  }, [persistenceControls])
 
   // Create ExcalidrawBinding when API is ready
   useEffect(() => {
@@ -143,6 +168,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId }) => {
         color: '#64748b',
         display: 'flex',
         justifyContent: 'space-between',
+        alignItems: 'center',
         zIndex: 1000
       }}>
         <span>
@@ -153,7 +179,28 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId }) => {
           {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
           {' · '}
           {peerCount + 1} user{peerCount > 0 ? 's' : ''} collaborating
+          {' · '}
+          {persistenceState.loading ? '⏳ Loading...' :
+           persistenceState.saving ? '💾 Saving...' :
+           persistenceState.lastSave ? `✓ Saved ${new Date(persistenceState.lastSave.timestamp).toLocaleTimeString()}` :
+           '○ Not saved'}
         </span>
+        <button
+          onClick={handleSave}
+          disabled={!persistenceState.initialized || persistenceState.saving || !persistenceState.dirty}
+          style={{
+            padding: '0.25rem 0.5rem',
+            fontSize: '0.75rem',
+            border: '1px solid #d1d5db',
+            borderRadius: '0.25rem',
+            backgroundColor: persistenceState.dirty ? '#3b82f6' : '#10b981',
+            color: 'white',
+            cursor: persistenceState.dirty ? 'pointer' : 'default',
+            opacity: (!persistenceState.initialized || persistenceState.saving || !persistenceState.dirty) ? 0.5 : 1,
+          }}
+        >
+          {persistenceState.saving ? 'Saving...' : persistenceState.dirty ? 'Save' : 'Saved'}
+        </button>
       </div>
     </div>
   )
