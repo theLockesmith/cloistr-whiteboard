@@ -6,7 +6,9 @@ import { ExcalidrawBinding, yjsToExcalidraw } from 'y-excalidraw'
 import { NostrSyncProvider, useDocumentPersistence } from '@cloistr/collab-common'
 import { useNostrAuth } from '../App'
 
-const BLOSSOM_URL = 'https://files.cloistr.xyz'
+// For development, use VITE_BLOSSOM_URL env var or fall back to public server
+// Production uses files.cloistr.xyz with platform auth
+const BLOSSOM_URL = import.meta.env.VITE_BLOSSOM_URL || 'https://nostr.download'
 
 interface WhiteboardProps {
   documentId: string
