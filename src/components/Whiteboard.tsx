@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Excalidraw, MainMenu, WelcomeScreen } from '@excalidraw/excalidraw'
-import type { AppState, ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types/types'
+import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types/types'
 import * as Y from 'yjs'
+import { ExcalidrawBinding, yjsToExcalidraw } from 'y-excalidraw'
 import { NostrSyncProvider } from '@cloistr/collab-common'
 import { useNostrAuth } from '../App'
 
@@ -13,9 +14,12 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId }) => {
   const { signer, publicKey, relayUrl } = useNostrAuth()
   const [excalidrawAPI, setExcalidrawAPI] = useState<ExcalidrawImperativeAPI | null>(null)
   const [ydoc] = useState(() => new Y.Doc())
-  const [, setProvider] = useState<NostrSyncProvider | null>(null)
+  const [yElements] = useState(() => ydoc.getArray<Y.Map<any>>('elements'))
+  const [yAssets] = useState(() => ydoc.getMap('assets'))
   const [isConnected, setIsConnected] = useState(false)
   const [peerCount, setPeerCount] = useState(0)
+  const bindingRef = useRef<ExcalidrawBinding | null>(null)
+  const providerRef = useRef<NostrSyncProvider | null>(null)
 
   // Initialize NostrSyncProvider
   useEffect(() => {
@@ -45,31 +49,52 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId }) => {
     }
 
     syncProvider.connect().catch(console.error)
-    setProvider(syncProvider)
+    providerRef.current = syncProvider
 
     return () => {
       syncProvider.destroy()
+      providerRef.current = null
     }
   }, [documentId, ydoc, signer, relayUrl])
 
-  // TODO: Add y-excalidraw integration for full sync
-  // For now, changes are logged but not synced between clients
-  const handleChange = useCallback((elements: readonly any[], _appState: AppState) => {
-    // TODO: Sync changes via Yjs when y-excalidraw is integrated
-    console.log('Whiteboard changed:', { elements: elements.length, user: publicKey?.slice(0, 8) })
-  }, [publicKey])
-
+  // Create ExcalidrawBinding when API is ready
   useEffect(() => {
-    if (excalidrawAPI && isConnected) {
-      console.log('[Whiteboard] Ready for collaboration:', publicKey?.slice(0, 8))
+    if (!excalidrawAPI) return
+
+    // Create the binding between Yjs and Excalidraw
+    const binding = new ExcalidrawBinding(
+      yElements,
+      yAssets,
+      excalidrawAPI,
+      undefined // awareness - could add for cursor tracking later
+    )
+
+    bindingRef.current = binding
+    console.log('[Whiteboard] ExcalidrawBinding created')
+
+    // Load initial state from Yjs if it exists
+    if (yElements.length > 0) {
+      const elements = yjsToExcalidraw(yElements)
+      excalidrawAPI.updateScene({ elements })
+      console.log('[Whiteboard] Loaded', elements.length, 'elements from Yjs')
     }
-  }, [excalidrawAPI, isConnected, publicKey])
+
+    return () => {
+      binding.destroy()
+      bindingRef.current = null
+      console.log('[Whiteboard] ExcalidrawBinding destroyed')
+    }
+  }, [excalidrawAPI, yElements, yAssets])
+
+  const handleAPIReady = useCallback((api: ExcalidrawImperativeAPI) => {
+    setExcalidrawAPI(api)
+    console.log('[Whiteboard] Excalidraw API ready')
+  }, [])
 
   return (
-    <div className="whiteboard-container" style={{ paddingTop: '50px' }}>
+    <div className="whiteboard-container" style={{ paddingTop: '50px', height: 'calc(100vh - 50px)' }}>
       <Excalidraw
-        excalidrawAPI={(api: ExcalidrawImperativeAPI) => setExcalidrawAPI(api)}
-        onChange={handleChange}
+        excalidrawAPI={handleAPIReady}
         UIOptions={{
           canvasActions: {
             loadScene: false,
@@ -112,7 +137,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId }) => {
         left: 0,
         right: 0,
         padding: '0.5rem 1rem',
-        backgroundColor: 'rgba(248, 250, 252, 0.9)',
+        backgroundColor: 'rgba(248, 250, 252, 0.95)',
         borderTop: '1px solid #e2e8f0',
         fontSize: '0.875rem',
         color: '#64748b',
@@ -120,11 +145,14 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId }) => {
         justifyContent: 'space-between',
         zIndex: 1000
       }}>
-        <span>Document: {documentId}</span>
+        <span>
+          Document: {documentId}
+          {publicKey && ` · User: ${publicKey.slice(0, 8)}...`}
+        </span>
         <span>
           {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
           {' · '}
-          {peerCount + 1} user{peerCount > 0 ? 's' : ''} online
+          {peerCount + 1} user{peerCount > 0 ? 's' : ''} collaborating
         </span>
       </div>
     </div>
