@@ -4,18 +4,21 @@ import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types/types
 import * as Y from 'yjs'
 import { ExcalidrawBinding, yjsToExcalidraw } from 'y-excalidraw'
 import { NostrSyncProvider, useDocumentPersistence } from '@cloistr/collab-common'
-import { useNostrAuth } from '../App'
+import type { SignerInterface } from '@cloistr/collab-common/auth'
 
 // For development, use VITE_BLOSSOM_URL env var or fall back to public server
 // Production uses files.cloistr.xyz with platform auth
 const BLOSSOM_URL = import.meta.env.VITE_BLOSSOM_URL || 'https://nostr.download'
 
 interface WhiteboardProps {
+  signer: SignerInterface
+  publicKey: string
+  relayUrl: string
   documentId: string
 }
 
-const Whiteboard: React.FC<WhiteboardProps> = ({ documentId }) => {
-  const { signer, publicKey, relayUrl } = useNostrAuth()
+const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, relayUrl }) => {
+  // signer, publicKey, relayUrl passed as props
   const [excalidrawAPI, setExcalidrawAPI] = useState<ExcalidrawImperativeAPI | null>(null)
   const [ydoc] = useState(() => new Y.Doc())
   const [yElements] = useState(() => ydoc.getArray<Y.Map<any>>('elements'))
