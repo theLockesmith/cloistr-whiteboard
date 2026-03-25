@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@cloistr/collab-common": "file:../cloistr-collab-common",
+    "@cloistr/collab-common": "^0.1.0",
     "@excalidraw/excalidraw": "^0.17.3",
     "@y-sweet/react": "^0.9.1",
     "cloistr-collab-common": "file:../cloistr-collab-common",
