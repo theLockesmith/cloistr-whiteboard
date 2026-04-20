@@ -122,7 +122,7 @@ const nostrProvider = new NostrYjsProvider(yjsDoc, roomId, relayUrls, signer)
 1. Changes made in `/home/forgemaster/Development/cloistr-whiteboard/`
 2. Built and tested locally via `npm run build`
 3. Deployed via GitLab CI/CD pipeline
-4. Container registry: `registry.coldforge.xyz/coldforge/cloistr-whiteboard`
+4. Container registry: `registry.aegis-hq.xyz/coldforge/cloistr-whiteboard`
 
 ### Environment Variables
 
