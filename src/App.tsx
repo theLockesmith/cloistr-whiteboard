@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import Whiteboard from './components/Whiteboard'
-import { AuthProvider, useNostrAuth } from '@cloistr/collab-common/auth'
-import { Header } from '@cloistr/ui/components'
+import { useNostrAuth } from '@cloistr/collab-common/auth'
+import { Header, SharedAuthProvider } from '@cloistr/ui/components'
 import '@cloistr/ui/styles'
 import './App.css'
 
@@ -63,9 +63,9 @@ function AppContent() {
 
 function App() {
   return (
-    <AuthProvider autoRestore={true}>
+    <SharedAuthProvider>
       <AppContent />
-    </AuthProvider>
+    </SharedAuthProvider>
   )
 }
 
