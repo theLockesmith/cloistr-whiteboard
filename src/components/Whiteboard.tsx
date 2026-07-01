@@ -4,7 +4,7 @@ import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types/types
 import * as Y from 'yjs'
 import { ExcalidrawBinding, yjsToExcalidraw } from 'y-excalidraw'
 import { NostrSyncProvider, useDocumentPersistence } from '@cloistr/collab-common'
-import type { SignerInterface } from '@cloistr/collab-common/auth'
+import type { SignerInterface } from '@cloistr/auth'
 
 // For development, use VITE_BLOSSOM_URL env var or fall back to public server
 // Production uses files.cloistr.xyz with platform auth

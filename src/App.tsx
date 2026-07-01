@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import Whiteboard from './components/Whiteboard'
-import { useNostrAuth } from '@cloistr/collab-common/auth'
+import { useNostrAuth } from '@cloistr/auth'
 import { getOrCreateDocumentId, getServiceConfig } from '@cloistr/collab-common/config'
 import { Header, SharedAuthProvider, ToastProvider, LoginPrompt } from '@cloistr/ui/components'
 import '@cloistr/ui/styles'
