@@ -19,7 +19,7 @@
     "react": ">=16.8.0",
     "react-dom": ">=16.8.0",
     "y-excalidraw": "^2.0.12",
-    "yjs": "^13.6.10"
+    "yjs": "^13.6.31"
   },
   "devDependencies": {
     "@types/react": "^18.2.56",
