@@ -27,6 +27,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
   const [peerCount, setPeerCount] = useState(0)
   const bindingRef = useRef<ExcalidrawBinding | null>(null)
   const providerRef = useRef<NostrSyncProvider | null>(null)
+  const [provider, setProvider] = useState<NostrSyncProvider | null>(null)
 
   // Initialize NostrSyncProvider
   useEffect(() => {
@@ -57,10 +58,12 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
 
     syncProvider.connect().catch(console.error)
     providerRef.current = syncProvider
+    setProvider(syncProvider)
 
     return () => {
       syncProvider.destroy()
       providerRef.current = null
+      setProvider(null)
     }
   }, [documentId, ydoc, signer, relayUrl])
 
@@ -89,14 +92,17 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
 
   // Create ExcalidrawBinding when API is ready
   useEffect(() => {
-    if (!excalidrawAPI) return
+    // Wait for BOTH the Excalidraw API and the provider: y-excalidraw's binding
+    // dereferences `awareness.getStates()` unguarded, so passing undefined
+    // crashed ("this.awareness is undefined"). Pass the provider's awareness.
+    if (!excalidrawAPI || !provider) return
 
     // Create the binding between Yjs and Excalidraw
     const binding = new ExcalidrawBinding(
       yElements,
       yAssets,
       excalidrawAPI,
-      undefined // awareness - could add for cursor tracking later
+      provider.awareness
     )
 
     bindingRef.current = binding
@@ -114,7 +120,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
       bindingRef.current = null
       console.log('[Whiteboard] ExcalidrawBinding destroyed')
     }
-  }, [excalidrawAPI, yElements, yAssets])
+  }, [excalidrawAPI, yElements, yAssets, provider])
 
   const handleAPIReady = useCallback((api: ExcalidrawImperativeAPI) => {
     setExcalidrawAPI(api)
