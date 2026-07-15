@@ -10,9 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@cloistr/auth": "^0.2.2",
-    "@cloistr/collab-common": "^0.2.6",
-    "@cloistr/ui": "^0.17.0",
+    "@cloistr/auth": "^0.4.0",
+    "@cloistr/collab-common": "^0.2.7",
+    "@cloistr/ui": "^0.20.1",
     "@excalidraw/excalidraw": "^0.17.3",
     "@y-sweet/react": "^0.9.1",
     "nostr-tools": "^2.3.1",
