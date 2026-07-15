@@ -13,7 +13,7 @@
     "@cloistr/auth": "^0.4.0",
     "@cloistr/collab-common": "^0.2.7",
     "@cloistr/ui": "^0.20.1",
-    "@excalidraw/excalidraw": "^0.17.3",
+    "@excalidraw/excalidraw": "^0.18.1",
     "@y-sweet/react": "^0.9.1",
     "nostr-tools": "^2.3.1",
     "react": ">=16.8.0",
