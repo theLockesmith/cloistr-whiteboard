@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { Excalidraw, MainMenu, WelcomeScreen } from '@excalidraw/excalidraw'
+import { Excalidraw, MainMenu, WelcomeScreen, exportToBlob } from '@excalidraw/excalidraw'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types/types'
 import * as Y from 'yjs'
 import { ExcalidrawBinding, yjsToExcalidraw } from 'y-excalidraw'
@@ -18,7 +18,6 @@ interface WhiteboardProps {
 }
 
 const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, relayUrl }) => {
-  // signer, publicKey, relayUrl passed as props
   const [excalidrawAPI, setExcalidrawAPI] = useState<ExcalidrawImperativeAPI | null>(null)
   const [ydoc] = useState(() => new Y.Doc())
   const [yElements] = useState(() => ydoc.getArray<Y.Map<any>>('elements'))
@@ -90,6 +89,30 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
     }
   }, [persistenceControls])
 
+  // Export as PDF via Excalidraw's exportToBlob
+  const handleExportPdf = useCallback(async () => {
+    if (!excalidrawAPI) return
+    try {
+      const elements = excalidrawAPI.getSceneElements()
+      const appState = excalidrawAPI.getAppState()
+      const blob = await exportToBlob({
+        elements,
+        appState,
+        files: excalidrawAPI.getFiles(),
+        mimeType: 'image/png', // exportToBlob doesn't support PDF natively; PNG is lossless
+        getDimensions: () => ({ width: 2480, height: 3508 }), // A4 at 300dpi
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${documentId}.png`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('[Whiteboard] Export failed:', error)
+    }
+  }, [excalidrawAPI, documentId])
+
   // Create ExcalidrawBinding when API is ready
   useEffect(() => {
     // Wait for BOTH the Excalidraw API and the provider: y-excalidraw's binding
@@ -97,7 +120,6 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
     // crashed ("this.awareness is undefined"). Pass the provider's awareness.
     if (!excalidrawAPI || !provider) return
 
-    // Create the binding between Yjs and Excalidraw
     const binding = new ExcalidrawBinding(
       yElements,
       yAssets,
@@ -127,80 +149,140 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
     console.log('[Whiteboard] Excalidraw API ready')
   }, [])
 
+  // Abbreviated labels for the status bar: keep the bar to one line on mobile.
+  // The full documentId is long (e.g. "whiteboard-abc123-def456"); truncate after
+  // 20 chars so it doesn't push the bar to a second line at 375px.
+  const docLabel = documentId.length > 20 ? `${documentId.slice(0, 20)}...` : documentId
+  const userLabel = publicKey ? publicKey.slice(0, 8) + '...' : ''
+
+  const saveLabel = persistenceState.saving
+    ? 'Saving...'
+    : persistenceState.dirty
+    ? 'Save'
+    : 'Saved'
+
   return (
-    <div className="whiteboard-container" style={{ paddingTop: '50px', height: 'calc(100vh - 50px)' }}>
-      <Excalidraw
-        excalidrawAPI={handleAPIReady}
-        UIOptions={{
-          canvasActions: {
-            loadScene: false,
-            saveToActiveFile: false,
-            saveAsImage: true,
-            export: {
-              saveFileToDisk: false,
+    /*
+     * Layout: flex column filling the space allocated by App's flex column.
+     *
+     * Before this fix the container had `paddingTop:'50px'` and
+     * `height:'calc(100vh - 50px)'`. The header is sticky (not fixed) so it
+     * occupies its natural height in the flow. The App div is now a flex
+     * column; this container gets flex:1 from App.css and must be a flex
+     * column itself so the Excalidraw canvas and the status bar stack
+     * vertically without overlap.
+     *
+     * The status bar was previously `position:fixed bottom:0`, which overlaid
+     * the Excalidraw bottom toolbar and caused Excalidraw's bottom bar to be
+     * invisible (the two elements share the same z-plane at the viewport
+     * bottom). Moving it into the flex column puts it below the canvas in
+     * normal flow, with no z-fighting and no height assumptions.
+     */
+    <div className="whiteboard-container">
+      {/* Canvas area: flex:1 + min-height:0 lets Excalidraw fill without
+          leaking outside the container when the status bar shrinks the total
+          available height. */}
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <Excalidraw
+          excalidrawAPI={handleAPIReady}
+          UIOptions={{
+            canvasActions: {
+              loadScene: false,
+              saveToActiveFile: false,
+              saveAsImage: true,
+              export: {
+                // Re-enabled: data portability is a stated Cloistr principle.
+                // Previously set to false, which blocked .excalidraw / SVG export.
+                saveFileToDisk: true,
+              },
             },
-          },
+          }}
+        >
+          <MainMenu>
+            <MainMenu.DefaultItems.ClearCanvas />
+            <MainMenu.DefaultItems.SaveAsImage />
+            <MainMenu.DefaultItems.Export />
+            <MainMenu.DefaultItems.ChangeCanvasBackground />
+            <MainMenu.Item onSelect={handleExportPdf}>
+              Export as PNG (high-res)
+            </MainMenu.Item>
+            <MainMenu.Item onSelect={() => {}}>
+              {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
+              {' · '}{peerCount + 1} online
+            </MainMenu.Item>
+          </MainMenu>
+          <WelcomeScreen>
+            <WelcomeScreen.Hints.MenuHint />
+            <WelcomeScreen.Hints.ToolbarHint />
+            <WelcomeScreen.Center>
+              <WelcomeScreen.Center.Heading>
+                Cloistr Whiteboard
+              </WelcomeScreen.Center.Heading>
+              <WelcomeScreen.Center.Menu>
+                <WelcomeScreen.Center.MenuItemLoadScene />
+                <WelcomeScreen.Center.MenuItemHelp />
+              </WelcomeScreen.Center.Menu>
+            </WelcomeScreen.Center>
+          </WelcomeScreen>
+        </Excalidraw>
+      </div>
+
+      {/*
+       * Status bar: in-flow at the bottom of the flex column.
+       *
+       * Previously position:fixed bottom:0. On mobile at 375px that caused
+       * two problems:
+       *  1. Flex wrapping made it 101px tall, eating canvas space.
+       *  2. It overlaid the Excalidraw bottom toolbar, hiding all mobile tools.
+       *
+       * Fix: in-flow flex row with flex-wrap:nowrap. Text items get
+       * overflow:hidden + text-overflow:ellipsis so they truncate rather than
+       * wrap. The button is flex-shrink:0 so it never disappears. Height is
+       * implicitly ~40px (line-height 1.5 at 0.875rem + 0.5rem vertical padding).
+       */}
+      <div
+        style={{
+          flexShrink: 0,
+          padding: '0.25rem 0.75rem',
+          backgroundColor: 'var(--cloistr-bg-elevated)',
+          borderTop: '1px solid var(--cloistr-border)',
+          fontSize: '0.8125rem',
+          color: 'var(--cloistr-text-muted)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          flexWrap: 'nowrap',
+          minWidth: 0,
+          overflow: 'hidden',
+          zIndex: 10,
         }}
       >
-        <MainMenu>
-          <MainMenu.DefaultItems.ClearCanvas />
-          <MainMenu.DefaultItems.SaveAsImage />
-          <MainMenu.DefaultItems.ChangeCanvasBackground />
-          <MainMenu.Item onSelect={() => {}}>
-            {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
-            {' · '}{peerCount + 1} online
-          </MainMenu.Item>
-        </MainMenu>
-        <WelcomeScreen>
-          <WelcomeScreen.Hints.MenuHint />
-          <WelcomeScreen.Hints.ToolbarHint />
-          <WelcomeScreen.Center>
-            <WelcomeScreen.Center.Heading>
-              Cloistr Whiteboard
-            </WelcomeScreen.Center.Heading>
-            <WelcomeScreen.Center.Menu>
-              <WelcomeScreen.Center.MenuItemLoadScene />
-              <WelcomeScreen.Center.MenuItemHelp />
-            </WelcomeScreen.Center.Menu>
-          </WelcomeScreen.Center>
-        </WelcomeScreen>
-      </Excalidraw>
-
-      {/* Status bar */}
-      <div style={{
-        position: 'fixed',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        padding: '0.5rem 1rem',
-        backgroundColor: 'var(--cloistr-bg-elevated)',
-        borderTop: '1px solid var(--cloistr-border)',
-        fontSize: '0.875rem',
-        color: 'var(--cloistr-text-muted)',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        zIndex: 1000
-      }}>
-        <span>
-          Document: {documentId}
-          {publicKey && ` · User: ${publicKey.slice(0, 8)}...`}
+        <span
+          style={{
+            flex: '1 1 0',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            minWidth: 0,
+          }}
+        >
+          {docLabel}{userLabel ? ` · ${userLabel}` : ''}
         </span>
-        <span>
-          {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
+        <span style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
+          {isConnected ? '🟢' : '🔴'}
+          {' '}{peerCount + 1}p
           {' · '}
-          {peerCount + 1} user{peerCount > 0 ? 's' : ''} collaborating
-          {' · '}
-          {persistenceState.loading ? '⏳ Loading...' :
-           persistenceState.saving ? '💾 Saving...' :
-           persistenceState.lastSave ? `✓ Saved ${new Date(persistenceState.lastSave.timestamp).toLocaleTimeString()}` :
-           '○ Not saved'}
+          {persistenceState.loading ? '⏳' :
+           persistenceState.saving ? '💾' :
+           persistenceState.lastSave ? `✓ ${new Date(persistenceState.lastSave.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` :
+           '○'}
         </span>
         <button
           onClick={handleSave}
           disabled={!persistenceState.initialized || persistenceState.saving || !persistenceState.dirty}
           style={{
-            padding: '0.25rem 0.5rem',
+            flexShrink: 0,
+            padding: '0.2rem 0.5rem',
             fontSize: '0.75rem',
             border: '1px solid var(--cloistr-border)',
             borderRadius: '0.25rem',
@@ -208,9 +290,10 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
             color: 'white',
             cursor: persistenceState.dirty ? 'pointer' : 'default',
             opacity: (!persistenceState.initialized || persistenceState.saving || !persistenceState.dirty) ? 0.5 : 1,
+            whiteSpace: 'nowrap',
           }}
         >
-          {persistenceState.saving ? 'Saving...' : persistenceState.dirty ? 'Save' : 'Saved'}
+          {saveLabel}
         </button>
       </div>
     </div>
