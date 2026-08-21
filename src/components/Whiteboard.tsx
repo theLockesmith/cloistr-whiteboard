@@ -89,8 +89,14 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
     }
   }, [persistenceControls])
 
-  // Export as PDF via Excalidraw's exportToBlob
-  const handleExportPdf = useCallback(async () => {
+  // Export the scene as a high-resolution PNG via Excalidraw's exportToBlob.
+  //
+  // Named for what it does. This was handleExportPdf with a comment claiming
+  // PDF, while the body passes mimeType 'image/png' and saves a .png file. The
+  // menu label was already correct, so only the identifier and comment lied —
+  // harmless at runtime, and exactly the kind of thing that sends the next
+  // person looking for a PDF code path that does not exist.
+  const handleExportHighResPng = useCallback(async () => {
     if (!excalidrawAPI) return
     try {
       const elements = excalidrawAPI.getSceneElements()
@@ -203,7 +209,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
             <MainMenu.DefaultItems.SaveAsImage />
             <MainMenu.DefaultItems.Export />
             <MainMenu.DefaultItems.ChangeCanvasBackground />
-            <MainMenu.Item onSelect={handleExportPdf}>
+            <MainMenu.Item onSelect={handleExportHighResPng}>
               Export as PNG (high-res)
             </MainMenu.Item>
             <MainMenu.Item onSelect={() => {}}>
