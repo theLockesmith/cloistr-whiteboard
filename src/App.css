@@ -1,10 +1,20 @@
 .App {
+  display: flex;
+  flex-direction: column;
   width: 100vw;
   height: 100vh;
   overflow: hidden;
 }
 
+/* The whiteboard fill-area stretches below the sticky header to fill the
+   remaining viewport. min-height:0 is required on flex children that
+   themselves contain a flex/overflow subtree — without it the browser
+   uses the content's intrinsic height instead of the flex-allocated one,
+   which causes the Excalidraw container to overflow the page. */
 .whiteboard-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  height: 100%;
 }
