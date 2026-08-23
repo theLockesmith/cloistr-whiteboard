@@ -6,6 +6,7 @@ import { ExcalidrawBinding, yjsToExcalidraw } from 'y-excalidraw'
 import { NostrSyncProvider, useDocumentPersistence } from '@cloistr/collab-common'
 import { generateUserColor } from '@cloistr/collab-common/presence'
 import type { SignerInterface } from '@cloistr/auth'
+import { withSignerRetry } from '@cloistr/ui'
 import TemplatesModal from './TemplatesModal'
 import { TEMPLATES } from '../templates'
 import type { WhiteboardTemplate } from '../templates'
@@ -35,9 +36,15 @@ interface WhiteboardProps {
   publicKey: string
   relayUrl: string
   documentId: string
+  /**
+   * Called when a signing operation fails after all automatic retries are
+   * exhausted. The parent mounts SignerRecovery so the user sees the recovery
+   * screen rather than a blank error or a login prompt.
+   */
+  onSignerError?: (err: unknown) => void
 }
 
-const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, relayUrl }) => {
+const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, relayUrl, onSignerError }) => {
   const [excalidrawAPI, setExcalidrawAPI] = useState<ExcalidrawImperativeAPI | null>(null)
   const [ydoc] = useState(() => new Y.Doc())
   const [yElements] = useState(() => ydoc.getArray<Y.Map<any>>('elements'))
@@ -119,11 +126,19 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
 
   const handleSave = useCallback(async () => {
     try {
-      await persistenceControls.save()
+      // withSignerRetry automatically retries retryable errors (relay
+      // unreachable, socket closed) up to 3 times with exponential backoff +
+      // jitter. A user denial (CANCELLED, REMOTE_ERROR) is rethrown immediately
+      // without retrying — retrying a refusal would re-prompt the user for
+      // something they already declined.
+      await withSignerRetry(() => persistenceControls.save())
     } catch (error) {
       console.error('[Whiteboard] Save failed:', error)
+      // Propagate to parent so SignerRecovery is shown instead of leaving the
+      // user looking at a Save button that silently failed.
+      onSignerError?.(error)
     }
-  }, [persistenceControls])
+  }, [persistenceControls, onSignerError])
 
   // Export the scene as a high-resolution PNG via Excalidraw's exportToBlob.
   const handleExportHighResPng = useCallback(async () => {
