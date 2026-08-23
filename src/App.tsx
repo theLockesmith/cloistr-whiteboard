@@ -61,11 +61,11 @@ function AppContent() {
     }
 
     return (
-      /* height restored: the old markup passed calc(100vh - 60px). Without it
-         LoginPrompt resolves to 100vh inside the flex column and renders about
+      /* height restored: the old markup passed calc(100dvh - 60px). Without it
+         LoginPrompt resolves to the full dynamic-viewport-height inside the flex column and renders about
          30px below the visual centre of the space actually available. */
       <LoginPrompt
-        style={{ height: 'calc(100vh - 60px)' }}
+        style={{ height: 'calc(100dvh - 60px)' }}
         title="Cloistr Whiteboard"
         subtitle="Collaborative whiteboard powered by Nostr"
         callToAction="Sign in to create or edit whiteboards."
