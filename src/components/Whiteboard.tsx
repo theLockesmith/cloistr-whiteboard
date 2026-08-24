@@ -8,9 +8,6 @@ import { generateDocumentId } from '@cloistr/collab-common/config'
 import { generateUserColor } from '@cloistr/collab-common/presence'
 import type { SignerInterface } from '@cloistr/auth'
 import { withSignerRetry, useToast } from '@cloistr/ui'
-import TemplatesModal from './TemplatesModal'
-import MenuBar from './MenuBar'
-import type { MenuBarSection } from './MenuBar'
 import { TEMPLATES } from '../templates'
 import type { WhiteboardTemplate } from '../templates'
 
@@ -41,7 +38,6 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
   const [yAssets] = useState(() => ydoc.getMap('assets'))
   const [isConnected, setIsConnected] = useState(false)
   const [peerCount, setPeerCount] = useState(0)
-  const [showTemplates, setShowTemplates] = useState(false)
   const bindingRef = useRef<ExcalidrawBinding | null>(null)
   const providerRef = useRef<NostrSyncProvider | null>(null)
   const [provider, setProvider] = useState<NostrSyncProvider | null>(null)
@@ -252,100 +248,10 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
     console.log('[Whiteboard] Excalidraw API ready')
   }, [])
 
-  // ---- Menu bar definition -------------------------------------------------
-  //
-  // Sections cover only what Excalidraw's MainMenu does NOT: board lifecycle,
-  // Cloistr-format exports, templates, and sharing. Canvas-native controls
-  // (clear, background colour) stay in Excalidraw's own hamburger menu to
-  // avoid duplicating UI paths.
-  //
-  // Items with no backend yet are DISABLED with a tooltip — never omitted, so
-  // the structure stays learnable.
-
   const canSave =
     persistenceState.initialized &&
     !persistenceState.saving &&
     !!persistenceState.dirty
-
-  const menuSections: MenuBarSection[] = [
-    {
-      id: 'file',
-      label: 'File',
-      items: [
-        {
-          id: 'file-new',
-          label: 'New Board',
-          action: handleNewBoard,
-        },
-        {
-          id: 'file-open',
-          label: 'Open Board…',
-          disabled: true,
-          disabledReason: 'Board browser coming soon',
-          action: () => {},
-        },
-        { id: 'sep-file-1', divider: true as const },
-        {
-          id: 'file-save',
-          label: 'Save',
-          shortcut: 'Ctrl+S',
-          disabled: !canSave,
-          disabledReason: canSave ? undefined : 'No unsaved changes',
-          action: handleSave,
-        },
-      ],
-    },
-    {
-      id: 'export',
-      label: 'Export',
-      items: [
-        {
-          id: 'export-png',
-          label: 'Export as PNG (A4, 300 dpi)',
-          disabled: !excalidrawAPI,
-          disabledReason: excalidrawAPI ? undefined : 'Canvas not ready',
-          action: handleExportHighResPng,
-        },
-        {
-          id: 'export-svg',
-          label: 'Export as SVG',
-          disabled: !excalidrawAPI,
-          disabledReason: excalidrawAPI ? undefined : 'Canvas not ready',
-          action: handleExportSvg,
-        },
-      ],
-    },
-    {
-      id: 'templates',
-      label: 'Templates',
-      items: TEMPLATES.map(t => ({
-        id: `tmpl-${t.id}`,
-        label: `${t.emoji} ${t.name}`,
-        disabled: !excalidrawAPI,
-        disabledReason: excalidrawAPI ? undefined : 'Canvas not ready',
-        action: () => handleLoadTemplate(t),
-      })),
-    },
-    {
-      id: 'share',
-      label: 'Share',
-      items: [
-        {
-          id: 'share-copy-link',
-          label: 'Copy Board Link',
-          action: handleCopyLink,
-        },
-        { id: 'sep-share-1', divider: true as const },
-        {
-          id: 'share-invite',
-          label: 'Invite Collaborators…',
-          disabled: true,
-          disabledReason: 'Collaborator invites coming soon',
-          action: () => {},
-        },
-      ],
-    },
-  ]
 
   // ---- Status bar labels ---------------------------------------------------
   const docLabel = documentId.length > 20 ? `${documentId.slice(0, 20)}...` : documentId
@@ -359,16 +265,6 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
 
   return (
     <div className="whiteboard-container">
-      {showTemplates && (
-        <TemplatesModal
-          templates={TEMPLATES}
-          onSelect={handleLoadTemplate}
-          onClose={() => setShowTemplates(false)}
-        />
-      )}
-
-      {/* Cloistr menu bar: sits between the global Header and the canvas. */}
-      <MenuBar sections={menuSections} />
 
       {/* Canvas area: flex:1 + min-height:0 lets Excalidraw fill without
           leaking outside the container. */}
@@ -387,19 +283,44 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
           }}
         >
           {/*
-           * MainMenu keeps only Excalidraw-native items. Export and Templates
-           * moved to the persistent MenuBar above to avoid two competing paths
-           * to the same action.
+           * Cloistr-specific items live here alongside Excalidraw's own canvas
+           * controls. No standalone menu bar sits above the canvas — one
+           * navigation system, zero chrome waste.
            */}
           <MainMenu>
+            <MainMenu.Group title="Board">
+              <MainMenu.Item onSelect={handleNewBoard}>New Board</MainMenu.Item>
+            </MainMenu.Group>
+            <MainMenu.Separator />
+            <MainMenu.Group title="Export">
+              <MainMenu.Item onSelect={handleExportHighResPng}>Export PNG (A4, 300 dpi)</MainMenu.Item>
+              <MainMenu.Item onSelect={handleExportSvg}>Export SVG</MainMenu.Item>
+              <MainMenu.DefaultItems.SaveAsImage />
+              <MainMenu.DefaultItems.Export />
+            </MainMenu.Group>
+            <MainMenu.Separator />
+            <MainMenu.Group title="Templates">
+              {TEMPLATES.map(t => (
+                <MainMenu.Item key={t.id} onSelect={() => handleLoadTemplate(t)}>
+                  {t.emoji} {t.name}
+                </MainMenu.Item>
+              ))}
+            </MainMenu.Group>
+            <MainMenu.Separator />
+            <MainMenu.Group title="Share">
+              <MainMenu.Item onSelect={handleCopyLink}>Copy Board Link</MainMenu.Item>
+            </MainMenu.Group>
+            <MainMenu.Separator />
             <MainMenu.DefaultItems.ClearCanvas />
             <MainMenu.DefaultItems.ChangeCanvasBackground />
-            <MainMenu.DefaultItems.SaveAsImage />
-            <MainMenu.DefaultItems.Export />
-            <MainMenu.Item onSelect={() => {}}>
-              {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
-              {' · '}{peerCount + 1} online
-            </MainMenu.Item>
+            <MainMenu.DefaultItems.ToggleTheme />
+            <MainMenu.Separator />
+            <MainMenu.ItemCustom>
+              <span style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', opacity: 0.6 }}>
+                {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
+                {' · '}{peerCount + 1} online
+              </span>
+            </MainMenu.ItemCustom>
           </MainMenu>
           <WelcomeScreen>
             <WelcomeScreen.Hints.MenuHint />
