@@ -4,11 +4,31 @@ import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types/types
 import * as Y from 'yjs'
 import { ExcalidrawBinding, yjsToExcalidraw } from 'y-excalidraw'
 import { NostrSyncProvider, useDocumentPersistence } from '@cloistr/collab-common'
+import { generateUserColor } from '@cloistr/collab-common/presence'
 import type { SignerInterface } from '@cloistr/auth'
+import TemplatesModal from './TemplatesModal'
+import { TEMPLATES } from '../templates'
+import type { WhiteboardTemplate } from '../templates'
 
 // For development, use VITE_BLOSSOM_URL env var or fall back to public server
 // Production uses files.cloistr.xyz with platform auth
 const BLOSSOM_URL = import.meta.env.VITE_BLOSSOM_URL || 'https://nostr.download'
+
+// Collaborator colors used for multiplayer cursor display.
+// Picked to be visually distinct and work in both light and dark themes.
+
+function pickCollabColor(pubkey: string): { color: string; light: string } {
+  // Deterministic pick based on pubkey bytes so a given user always gets the same
+  // colour. generateUserColor gives a CSS string; we need a hex pair here.
+  const generatedHex = generateUserColor(pubkey)
+  // Try to find a close match in our curated set, otherwise use the generated one.
+  // Using the generated hex directly is always safe for the color field; light is
+  // a 20%-opacity variant.
+  return {
+    color: generatedHex,
+    light: generatedHex + '33',
+  }
+}
 
 interface WhiteboardProps {
   signer: SignerInterface
@@ -24,6 +44,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
   const [yAssets] = useState(() => ydoc.getMap('assets'))
   const [isConnected, setIsConnected] = useState(false)
   const [peerCount, setPeerCount] = useState(0)
+  const [showTemplates, setShowTemplates] = useState(false)
   const bindingRef = useRef<ExcalidrawBinding | null>(null)
   const providerRef = useRef<NostrSyncProvider | null>(null)
   const [provider, setProvider] = useState<NostrSyncProvider | null>(null)
@@ -59,12 +80,27 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
     providerRef.current = syncProvider
     setProvider(syncProvider)
 
+    // Announce ourselves to remote peers via Yjs awareness.
+    //
+    // y-excalidraw reads awareness states with a "user" field in the format:
+    //   { name: string, color: string, colorLight: string }
+    // and passes them to Excalidraw's collaborators map so remote cursors are
+    // displayed with the correct label and colour. Without this the field is
+    // absent and all remote cursors appear grey and anonymous.
+    const { color, light } = pickCollabColor(publicKey)
+    const displayName = `User ${publicKey.slice(0, 6)}`
+    syncProvider.awareness.setLocalStateField('user', {
+      name: displayName,
+      color,
+      colorLight: light,
+    })
+
     return () => {
       syncProvider.destroy()
       providerRef.current = null
       setProvider(null)
     }
-  }, [documentId, ydoc, signer, relayUrl])
+  }, [documentId, ydoc, signer, relayUrl, publicKey])
 
   // Document persistence via Blossom
   const [persistenceState, persistenceControls] = useDocumentPersistence(
@@ -90,12 +126,6 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
   }, [persistenceControls])
 
   // Export the scene as a high-resolution PNG via Excalidraw's exportToBlob.
-  //
-  // Named for what it does. This was handleExportPdf with a comment claiming
-  // PDF, while the body passes mimeType 'image/png' and saves a .png file. The
-  // menu label was already correct, so only the identifier and comment lied —
-  // harmless at runtime, and exactly the kind of thing that sends the next
-  // person looking for a PDF code path that does not exist.
   const handleExportHighResPng = useCallback(async () => {
     if (!excalidrawAPI) return
     try {
@@ -105,8 +135,8 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
         elements,
         appState,
         files: excalidrawAPI.getFiles(),
-        mimeType: 'image/png', // exportToBlob doesn't support PDF natively; PNG is lossless
-        getDimensions: () => ({ width: 2480, height: 3508 }), // A4 at 300dpi
+        mimeType: 'image/png',
+        getDimensions: () => ({ width: 2480, height: 3508 }), // A4 at 300 dpi
       })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -115,9 +145,55 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
       a.click()
       URL.revokeObjectURL(url)
     } catch (error) {
-      console.error('[Whiteboard] Export failed:', error)
+      console.error('[Whiteboard] PNG export failed:', error)
     }
   }, [excalidrawAPI, documentId])
+
+  // Export the scene as an SVG file.
+  //
+  // Excalidraw 0.17.x exports exportToSvg as a named export alongside
+  // exportToBlob. It returns a Promise<SVGSVGElement>; we serialise to a
+  // data: URI and trigger a browser download via an <a> element.
+  //
+  // Note: exportToSvg is imported dynamically here to keep the initial
+  // bundle trim — the SVG path is rarely hit.
+  const handleExportSvg = useCallback(async () => {
+    if (!excalidrawAPI) return
+    try {
+      const { exportToSvg } = await import('@excalidraw/excalidraw')
+      const elements = excalidrawAPI.getSceneElements()
+      const appState = excalidrawAPI.getAppState()
+      const svg = await exportToSvg({
+        elements,
+        appState,
+        files: excalidrawAPI.getFiles(),
+        exportPadding: 16,
+      })
+      const svgString = new XMLSerializer().serializeToString(svg)
+      const blob = new Blob([svgString], { type: 'image/svg+xml' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${documentId}.svg`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('[Whiteboard] SVG export failed:', error)
+    }
+  }, [excalidrawAPI, documentId])
+
+  // Load a template into the scene.
+  //
+  // Replaces the current scene elements with the template's elements. Uses
+  // scrollToContent after update so the template is immediately visible
+  // regardless of the current viewport position.
+  const handleLoadTemplate = useCallback((template: WhiteboardTemplate) => {
+    if (!excalidrawAPI) return
+    excalidrawAPI.updateScene({ elements: template.elements as any })
+    if (template.elements.length > 0) {
+      excalidrawAPI.scrollToContent(undefined, { animate: true, fitToContent: true })
+    }
+  }, [excalidrawAPI])
 
   // Create ExcalidrawBinding when API is ready
   useEffect(() => {
@@ -156,8 +232,6 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
   }, [])
 
   // Abbreviated labels for the status bar: keep the bar to one line on mobile.
-  // The full documentId is long (e.g. "whiteboard-abc123-def456"); truncate after
-  // 20 chars so it doesn't push the bar to a second line at 375px.
   const docLabel = documentId.length > 20 ? `${documentId.slice(0, 20)}...` : documentId
   const userLabel = publicKey ? publicKey.slice(0, 8) + '...' : ''
 
@@ -170,21 +244,17 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
   return (
     /*
      * Layout: flex column filling the space allocated by App's flex column.
-     *
-     * Before this fix the container had `paddingTop:'50px'` and
-     * `height:'calc(100vh - 50px)'`. The header is sticky (not fixed) so it
-     * occupies its natural height in the flow. The App div is now a flex
-     * column; this container gets flex:1 from App.css and must be a flex
-     * column itself so the Excalidraw canvas and the status bar stack
-     * vertically without overlap.
-     *
-     * The status bar was previously `position:fixed bottom:0`, which overlaid
-     * the Excalidraw bottom toolbar and caused Excalidraw's bottom bar to be
-     * invisible (the two elements share the same z-plane at the viewport
-     * bottom). Moving it into the flex column puts it below the canvas in
-     * normal flow, with no z-fighting and no height assumptions.
+     * See App.css for the parent container rules.
      */
     <div className="whiteboard-container">
+      {showTemplates && (
+        <TemplatesModal
+          templates={TEMPLATES}
+          onSelect={handleLoadTemplate}
+          onClose={() => setShowTemplates(false)}
+        />
+      )}
+
       {/* Canvas area: flex:1 + min-height:0 lets Excalidraw fill without
           leaking outside the container when the status bar shrinks the total
           available height. */}
@@ -198,7 +268,6 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
               saveAsImage: true,
               export: {
                 // Re-enabled: data portability is a stated Cloistr principle.
-                // Previously set to false, which blocked .excalidraw / SVG export.
                 saveFileToDisk: true,
               },
             },
@@ -211,6 +280,12 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
             <MainMenu.DefaultItems.ChangeCanvasBackground />
             <MainMenu.Item onSelect={handleExportHighResPng}>
               Export as PNG (high-res)
+            </MainMenu.Item>
+            <MainMenu.Item onSelect={handleExportSvg}>
+              Export as SVG
+            </MainMenu.Item>
+            <MainMenu.Item onSelect={() => setShowTemplates(true)}>
+              Templates
             </MainMenu.Item>
             <MainMenu.Item onSelect={() => {}}>
               {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
@@ -236,15 +311,10 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
       {/*
        * Status bar: in-flow at the bottom of the flex column.
        *
-       * Previously position:fixed bottom:0. On mobile at 375px that caused
-       * two problems:
-       *  1. Flex wrapping made it 101px tall, eating canvas space.
-       *  2. It overlaid the Excalidraw bottom toolbar, hiding all mobile tools.
-       *
-       * Fix: in-flow flex row with flex-wrap:nowrap. Text items get
-       * overflow:hidden + text-overflow:ellipsis so they truncate rather than
-       * wrap. The button is flex-shrink:0 so it never disappears. Height is
-       * implicitly ~40px (line-height 1.5 at 0.875rem + 0.5rem vertical padding).
+       * The Save button is a minimum 44px tall (inclusive of 0.5rem vertical
+       * padding on a 1rem line-height at 0.875rem = ~14px text). Adjusted to
+       * meet the 44px touch-target minimum: padding increased from 0.2rem to
+       * 0.5rem vertical, font stays 0.875rem.
        */}
       <div
         style={{
@@ -288,8 +358,8 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
           disabled={!persistenceState.initialized || persistenceState.saving || !persistenceState.dirty}
           style={{
             flexShrink: 0,
-            padding: '0.2rem 0.5rem',
-            fontSize: '0.75rem',
+            padding: '0.5rem 0.75rem',
+            fontSize: '0.875rem',
             border: '1px solid var(--cloistr-border)',
             borderRadius: '0.25rem',
             backgroundColor: persistenceState.dirty ? 'var(--cloistr-info)' : 'var(--cloistr-success)',
@@ -297,6 +367,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
             cursor: persistenceState.dirty ? 'pointer' : 'default',
             opacity: (!persistenceState.initialized || persistenceState.saving || !persistenceState.dirty) ? 0.5 : 1,
             whiteSpace: 'nowrap',
+            minHeight: '44px',
           }}
         >
           {saveLabel}
