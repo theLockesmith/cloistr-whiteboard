@@ -4,10 +4,13 @@ import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types/types
 import * as Y from 'yjs'
 import { ExcalidrawBinding, yjsToExcalidraw } from 'y-excalidraw'
 import { NostrSyncProvider, useDocumentPersistence } from '@cloistr/collab-common'
+import { generateDocumentId } from '@cloistr/collab-common/config'
 import { generateUserColor } from '@cloistr/collab-common/presence'
 import type { SignerInterface } from '@cloistr/auth'
-import { withSignerRetry } from '@cloistr/ui'
+import { withSignerRetry, useToast } from '@cloistr/ui'
 import TemplatesModal from './TemplatesModal'
+import MenuBar from './MenuBar'
+import type { MenuBarSection } from './MenuBar'
 import { TEMPLATES } from '../templates'
 import type { WhiteboardTemplate } from '../templates'
 
@@ -15,16 +18,8 @@ import type { WhiteboardTemplate } from '../templates'
 // Production uses files.cloistr.xyz with platform auth
 const BLOSSOM_URL = import.meta.env.VITE_BLOSSOM_URL || 'https://nostr.download'
 
-// Collaborator colors used for multiplayer cursor display.
-// Picked to be visually distinct and work in both light and dark themes.
-
 function pickCollabColor(pubkey: string): { color: string; light: string } {
-  // Deterministic pick based on pubkey bytes so a given user always gets the same
-  // colour. generateUserColor gives a CSS string; we need a hex pair here.
   const generatedHex = generateUserColor(pubkey)
-  // Try to find a close match in our curated set, otherwise use the generated one.
-  // Using the generated hex directly is always safe for the color field; light is
-  // a 20%-opacity variant.
   return {
     color: generatedHex,
     light: generatedHex + '33',
@@ -36,11 +31,6 @@ interface WhiteboardProps {
   publicKey: string
   relayUrl: string
   documentId: string
-  /**
-   * Called when a signing operation fails after all automatic retries are
-   * exhausted. The parent mounts SignerRecovery so the user sees the recovery
-   * screen rather than a blank error or a login prompt.
-   */
   onSignerError?: (err: unknown) => void
 }
 
@@ -55,6 +45,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
   const bindingRef = useRef<ExcalidrawBinding | null>(null)
   const providerRef = useRef<NostrSyncProvider | null>(null)
   const [provider, setProvider] = useState<NostrSyncProvider | null>(null)
+  const { success: toastSuccess, error: toastError } = useToast()
 
   // Initialize NostrSyncProvider
   useEffect(() => {
@@ -87,13 +78,6 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
     providerRef.current = syncProvider
     setProvider(syncProvider)
 
-    // Announce ourselves to remote peers via Yjs awareness.
-    //
-    // y-excalidraw reads awareness states with a "user" field in the format:
-    //   { name: string, color: string, colorLight: string }
-    // and passes them to Excalidraw's collaborators map so remote cursors are
-    // displayed with the correct label and colour. Without this the field is
-    // absent and all remote cursors appear grey and anonymous.
     const { color, light } = pickCollabColor(publicKey)
     const displayName = `User ${publicKey.slice(0, 6)}`
     syncProvider.awareness.setLocalStateField('user', {
@@ -126,21 +110,31 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
 
   const handleSave = useCallback(async () => {
     try {
-      // withSignerRetry automatically retries retryable errors (relay
-      // unreachable, socket closed) up to 3 times with exponential backoff +
-      // jitter. A user denial (CANCELLED, REMOTE_ERROR) is rethrown immediately
-      // without retrying — retrying a refusal would re-prompt the user for
-      // something they already declined.
+      // withSignerRetry retries retryable errors up to 3x with backoff+jitter.
+      // User denials (CANCELLED, REMOTE_ERROR) rethrow immediately.
       await withSignerRetry(() => persistenceControls.save())
     } catch (error) {
       console.error('[Whiteboard] Save failed:', error)
-      // Propagate to parent so SignerRecovery is shown instead of leaving the
-      // user looking at a Save button that silently failed.
       onSignerError?.(error)
     }
   }, [persistenceControls, onSignerError])
 
-  // Export the scene as a high-resolution PNG via Excalidraw's exportToBlob.
+  // Ctrl+S: registered in capture phase so it fires before Excalidraw's own
+  // handlers on the canvas element.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault()
+        if (persistenceState.initialized && !persistenceState.saving && persistenceState.dirty) {
+          handleSave()
+        }
+      }
+    }
+    document.addEventListener('keydown', handler, { capture: true })
+    return () => document.removeEventListener('keydown', handler, { capture: true })
+  }, [handleSave, persistenceState.initialized, persistenceState.saving, persistenceState.dirty])
+
+  // Export PNG (A4 at 300 dpi)
   const handleExportHighResPng = useCallback(async () => {
     if (!excalidrawAPI) return
     try {
@@ -151,7 +145,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
         appState,
         files: excalidrawAPI.getFiles(),
         mimeType: 'image/png',
-        getDimensions: () => ({ width: 2480, height: 3508 }), // A4 at 300 dpi
+        getDimensions: () => ({ width: 2480, height: 3508 }),
       })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -164,14 +158,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
     }
   }, [excalidrawAPI, documentId])
 
-  // Export the scene as an SVG file.
-  //
-  // Excalidraw 0.17.x exports exportToSvg as a named export alongside
-  // exportToBlob. It returns a Promise<SVGSVGElement>; we serialise to a
-  // data: URI and trigger a browser download via an <a> element.
-  //
-  // Note: exportToSvg is imported dynamically here to keep the initial
-  // bundle trim — the SVG path is rarely hit.
+  // Export SVG
   const handleExportSvg = useCallback(async () => {
     if (!excalidrawAPI) return
     try {
@@ -197,11 +184,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
     }
   }, [excalidrawAPI, documentId])
 
-  // Load a template into the scene.
-  //
-  // Replaces the current scene elements with the template's elements. Uses
-  // scrollToContent after update so the template is immediately visible
-  // regardless of the current viewport position.
+  // Load template into the current scene
   const handleLoadTemplate = useCallback((template: WhiteboardTemplate) => {
     if (!excalidrawAPI) return
     excalidrawAPI.updateScene({ elements: template.elements as any })
@@ -210,11 +193,35 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
     }
   }, [excalidrawAPI])
 
-  // Create ExcalidrawBinding when API is ready
+  // New Board: navigate to a URL with a fresh docId.
+  // getOrCreateDocumentId stores the board ID as ?docId=... so navigating to
+  // a new docId gives a clean board with full React init.
+  const handleNewBoard = useCallback(() => {
+    if (!window.confirm(
+      'Start a new board?\n\nYour current board stays available at this URL — copy the link from Share > Copy Board Link first if you need it.',
+    )) return
+    const newId = generateDocumentId('whiteboard')
+    const newUrl = new URL(window.location.href)
+    newUrl.searchParams.set('docId', newId)
+    window.location.href = newUrl.toString()
+  }, [])
+
+  // Copy current URL (includes ?docId=...) so collaborators can open the
+  // same board by pasting the link.
+  const handleCopyLink = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href)
+      toastSuccess('Board link copied to clipboard')
+    } catch {
+      // Clipboard API unavailable (non-HTTPS or permission denied).
+      toastError('Could not copy — copy the link from the address bar manually')
+    }
+  }, [toastSuccess, toastError])
+
+  // Create ExcalidrawBinding when API is ready.
+  // y-excalidraw dereferences awareness.getStates() unguarded, so both
+  // excalidrawAPI and provider must exist before creating the binding.
   useEffect(() => {
-    // Wait for BOTH the Excalidraw API and the provider: y-excalidraw's binding
-    // dereferences `awareness.getStates()` unguarded, so passing undefined
-    // crashed ("this.awareness is undefined"). Pass the provider's awareness.
     if (!excalidrawAPI || !provider) return
 
     const binding = new ExcalidrawBinding(
@@ -227,7 +234,6 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
     bindingRef.current = binding
     console.log('[Whiteboard] ExcalidrawBinding created')
 
-    // Load initial state from Yjs if it exists
     if (yElements.length > 0) {
       const elements = yjsToExcalidraw(yElements)
       excalidrawAPI.updateScene({ elements })
@@ -246,7 +252,102 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
     console.log('[Whiteboard] Excalidraw API ready')
   }, [])
 
-  // Abbreviated labels for the status bar: keep the bar to one line on mobile.
+  // ---- Menu bar definition -------------------------------------------------
+  //
+  // Sections cover only what Excalidraw's MainMenu does NOT: board lifecycle,
+  // Cloistr-format exports, templates, and sharing. Canvas-native controls
+  // (clear, background colour) stay in Excalidraw's own hamburger menu to
+  // avoid duplicating UI paths.
+  //
+  // Items with no backend yet are DISABLED with a tooltip — never omitted, so
+  // the structure stays learnable.
+
+  const canSave =
+    persistenceState.initialized &&
+    !persistenceState.saving &&
+    !!persistenceState.dirty
+
+  const menuSections: MenuBarSection[] = [
+    {
+      id: 'file',
+      label: 'File',
+      items: [
+        {
+          id: 'file-new',
+          label: 'New Board',
+          action: handleNewBoard,
+        },
+        {
+          id: 'file-open',
+          label: 'Open Board…',
+          disabled: true,
+          disabledReason: 'Board browser coming soon',
+          action: () => {},
+        },
+        { id: 'sep-file-1', divider: true as const },
+        {
+          id: 'file-save',
+          label: 'Save',
+          shortcut: 'Ctrl+S',
+          disabled: !canSave,
+          disabledReason: canSave ? undefined : 'No unsaved changes',
+          action: handleSave,
+        },
+      ],
+    },
+    {
+      id: 'export',
+      label: 'Export',
+      items: [
+        {
+          id: 'export-png',
+          label: 'Export as PNG (A4, 300 dpi)',
+          disabled: !excalidrawAPI,
+          disabledReason: excalidrawAPI ? undefined : 'Canvas not ready',
+          action: handleExportHighResPng,
+        },
+        {
+          id: 'export-svg',
+          label: 'Export as SVG',
+          disabled: !excalidrawAPI,
+          disabledReason: excalidrawAPI ? undefined : 'Canvas not ready',
+          action: handleExportSvg,
+        },
+      ],
+    },
+    {
+      id: 'templates',
+      label: 'Templates',
+      items: TEMPLATES.map(t => ({
+        id: `tmpl-${t.id}`,
+        label: `${t.emoji} ${t.name}`,
+        disabled: !excalidrawAPI,
+        disabledReason: excalidrawAPI ? undefined : 'Canvas not ready',
+        action: () => handleLoadTemplate(t),
+      })),
+    },
+    {
+      id: 'share',
+      label: 'Share',
+      items: [
+        {
+          id: 'share-copy-link',
+          label: 'Copy Board Link',
+          action: handleCopyLink,
+        },
+        { id: 'sep-share-1', divider: true as const },
+        {
+          id: 'share-invite',
+          label: 'Invite Collaborators…',
+          disabled: true,
+          disabledReason: 'Collaborator invites coming soon',
+          action: () => {},
+        },
+      ],
+    },
+  ]
+
+  // ---- Status bar labels ---------------------------------------------------
   const docLabel = documentId.length > 20 ? `${documentId.slice(0, 20)}...` : documentId
   const userLabel = publicKey ? publicKey.slice(0, 8) + '...' : ''
 
@@ -257,10 +358,6 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
     : 'Saved'
 
   return (
-    /*
-     * Layout: flex column filling the space allocated by App's flex column.
-     * See App.css for the parent container rules.
-     */
     <div className="whiteboard-container">
       {showTemplates && (
         <TemplatesModal
@@ -270,9 +367,11 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
         />
       )}
 
+      {/* Cloistr menu bar: sits between the global Header and the canvas. */}
+      <MenuBar sections={menuSections} />
+
       {/* Canvas area: flex:1 + min-height:0 lets Excalidraw fill without
-          leaking outside the container when the status bar shrinks the total
-          available height. */}
+          leaking outside the container. */}
       <div style={{ flex: 1, minHeight: 0 }}>
         <Excalidraw
           excalidrawAPI={handleAPIReady}
@@ -282,26 +381,21 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
               saveToActiveFile: false,
               saveAsImage: true,
               export: {
-                // Re-enabled: data portability is a stated Cloistr principle.
                 saveFileToDisk: true,
               },
             },
           }}
         >
+          {/*
+           * MainMenu keeps only Excalidraw-native items. Export and Templates
+           * moved to the persistent MenuBar above to avoid two competing paths
+           * to the same action.
+           */}
           <MainMenu>
             <MainMenu.DefaultItems.ClearCanvas />
+            <MainMenu.DefaultItems.ChangeCanvasBackground />
             <MainMenu.DefaultItems.SaveAsImage />
             <MainMenu.DefaultItems.Export />
-            <MainMenu.DefaultItems.ChangeCanvasBackground />
-            <MainMenu.Item onSelect={handleExportHighResPng}>
-              Export as PNG (high-res)
-            </MainMenu.Item>
-            <MainMenu.Item onSelect={handleExportSvg}>
-              Export as SVG
-            </MainMenu.Item>
-            <MainMenu.Item onSelect={() => setShowTemplates(true)}>
-              Templates
-            </MainMenu.Item>
             <MainMenu.Item onSelect={() => {}}>
               {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
               {' · '}{peerCount + 1} online
@@ -325,11 +419,6 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
 
       {/*
        * Status bar: in-flow at the bottom of the flex column.
-       *
-       * The Save button is a minimum 44px tall (inclusive of 0.5rem vertical
-       * padding on a 1rem line-height at 0.875rem = ~14px text). Adjusted to
-       * meet the 44px touch-target minimum: padding increased from 0.2rem to
-       * 0.5rem vertical, font stays 0.875rem.
        */}
       <div
         style={{
@@ -370,7 +459,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
         </span>
         <button
           onClick={handleSave}
-          disabled={!persistenceState.initialized || persistenceState.saving || !persistenceState.dirty}
+          disabled={!canSave}
           style={{
             flexShrink: 0,
             padding: '0.5rem 0.75rem',
@@ -380,7 +469,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
             backgroundColor: persistenceState.dirty ? 'var(--cloistr-info)' : 'var(--cloistr-success)',
             color: 'white',
             cursor: persistenceState.dirty ? 'pointer' : 'default',
-            opacity: (!persistenceState.initialized || persistenceState.saving || !persistenceState.dirty) ? 0.5 : 1,
+            opacity: !canSave ? 0.5 : 1,
             whiteSpace: 'nowrap',
             minHeight: '44px',
           }}
