@@ -16,7 +16,7 @@
     "@cloistr/collab-common": "^0.2.15",
     "@cloistr/ui": "^0.40.0",
     "@excalidraw/excalidraw": "^0.18.1",
-    "nostr-tools": "^2.25.1",
+    "nostr-tools": "^2.25.2",
     "react": ">=16.14.0",
     "react-dom": ">=16.14.0",
     "y-excalidraw": "^2.0.12",
