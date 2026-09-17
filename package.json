@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@cloistr/auth": "^1.0.1",
-    "@cloistr/collab-common": "^0.2.15",
+    "@cloistr/collab-common": "^0.2.16",
     "@cloistr/ui": "^0.42.0",
     "@excalidraw/excalidraw": "^0.18.1",
     "nostr-tools": "^2.25.2",
