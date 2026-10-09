@@ -1,14 +1,18 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import Whiteboard from './components/Whiteboard'
 import { useNostrAuth } from '@cloistr/auth'
-import { getOrCreateDocumentId, getServiceConfig } from '@cloistr/collab-common/config'
+import { getOrCreateDocumentId } from '@cloistr/collab-common/config'
+import { resolveServiceAddresses } from './lib/serviceAddresses'
 import { Header, SharedAuthProvider, ToastProvider, LoginPrompt, Spinner, ThemeProvider, SignerRecovery } from '@cloistr/ui/components'
 import '@cloistr/ui/styles'
 import { useRelayReconnect } from './hooks/useRelayReconnect'
 import './App.css'
 
-// Service configuration from environment
-const config = getServiceConfig()
+// Service addresses, resolved once at module load: configuration the container
+// wrote at startup, then the build-time value, then the default. With no
+// runtime configuration this is exactly what the build args set, so production
+// is unchanged.
+const config = resolveServiceAddresses()
 
 /**
  * Main content - shows login prompt or whiteboard based on auth state.
@@ -190,7 +194,12 @@ function App() {
   return (
     <ThemeProvider>
       <ToastProvider>
-        <SharedAuthProvider>
+        {/* signerUrl was previously omitted, which silently inherited the
+            shared library's hardcoded production default and could not be
+            redirected. Passing it explicitly makes the signer follow the
+            environment; with no runtime configuration it is the same
+            production URL as before. */}
+        <SharedAuthProvider signerUrl={config.signerUrl}>
           <AppContent />
         </SharedAuthProvider>
       </ToastProvider>
