@@ -12,15 +12,15 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@cloistr/auth": "^1.0.1",
-    "@cloistr/collab-common": "^0.2.15",
-    "@cloistr/ui": "^0.42.0",
+    "@cloistr/auth": "^1.4.1",
+    "@cloistr/collab-common": "^0.4.0",
+    "@cloistr/ui": "^0.42.2",
     "@excalidraw/excalidraw": "^0.18.1",
     "nostr-tools": "^2.25.2",
     "react": ">=16.14.0",
     "react-dom": ">=16.14.0",
     "y-excalidraw": "^2.0.12",
-    "yjs": "^13.6.32"
+    "yjs": "^13.6.33"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^7.0.1",

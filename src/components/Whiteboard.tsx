@@ -10,10 +10,12 @@ import type { SignerInterface } from '@cloistr/auth'
 import { withSignerRetry, useToast } from '@cloistr/ui'
 import { TEMPLATES } from '../templates'
 import type { WhiteboardTemplate } from '../templates'
+import { resolveServiceAddresses } from '../lib/serviceAddresses'
 
-// For development, use VITE_BLOSSOM_URL env var or fall back to public server
-// Production uses files.cloistr.xyz with platform auth
-const BLOSSOM_URL = import.meta.env.VITE_BLOSSOM_URL || 'https://nostr.download'
+// Resolved through the app's one service-address home so the file host follows
+// the environment. Order is runtime, then build-time, then default, so with no
+// runtime configuration this is identical to what it was before.
+const BLOSSOM_URL = resolveServiceAddresses().blossomUrl
 
 function pickCollabColor(pubkey: string): { color: string; light: string } {
   const generatedHex = generateUserColor(pubkey)
