@@ -11,6 +11,7 @@ import { withSignerRetry, useToast } from '@cloistr/ui'
 import { TEMPLATES } from '../templates'
 import type { WhiteboardTemplate } from '../templates'
 import { resolveServiceAddresses } from '../lib/serviceAddresses'
+import { documentView, canSave as canSaveGate, saveBlockedReason } from '../lib/persistenceGate'
 
 // Resolved through the app's one service-address home so the file host follows
 // the environment. Order is runtime, then build-time, then default, so with no
@@ -106,7 +107,22 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
     }
   )
 
+  // What the board shows and whether saving is allowed, from one place.
+  // 'failed' covers a relay that never answered: before collab-common 0.7.1
+  // that looked like "no board yet" and the next save replaced the real one.
+  const view = documentView(persistenceState)
+  // Read through a ref so the capture-phase Ctrl+S listener never acts on
+  // stale state.
+  const persistenceStateRef = useRef(persistenceState)
+  persistenceStateRef.current = persistenceState
+
   const handleSave = useCallback(async () => {
+    // Every save path (status button, Ctrl+S) comes through here.
+    const blocked = saveBlockedReason(persistenceStateRef.current)
+    if (blocked) {
+      toastError(blocked)
+      return
+    }
     try {
       // withSignerRetry retries retryable errors up to 3x with backoff+jitter.
       // User denials (CANCELLED, REMOTE_ERROR) rethrow immediately.
@@ -115,7 +131,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
       console.error('[Whiteboard] Save failed:', error)
       onSignerError?.(error)
     }
-  }, [persistenceControls, onSignerError])
+  }, [persistenceControls, onSignerError, toastError])
 
   // Ctrl+S: registered in capture phase so it fires before Excalidraw's own
   // handlers on the canvas element.
@@ -123,14 +139,15 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault()
-        if (persistenceState.initialized && !persistenceState.saving && persistenceState.dirty) {
-          handleSave()
+        // handleSave applies the load gate and says why when blocked.
+        if (persistenceStateRef.current.dirty || persistenceStateRef.current.loadStatus !== 'loaded') {
+          void handleSave()
         }
       }
     }
     document.addEventListener('keydown', handler, { capture: true })
     return () => document.removeEventListener('keydown', handler, { capture: true })
-  }, [handleSave, persistenceState.initialized, persistenceState.saving, persistenceState.dirty])
+  }, [handleSave])
 
   // Export PNG (A4 at 300 dpi)
   const handleExportHighResPng = useCallback(async () => {
@@ -247,19 +264,25 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
 
   const handleAPIReady = useCallback((api: ExcalidrawImperativeAPI) => {
     setExcalidrawAPI(api)
+    // Same pattern as sheets' window.univerAPI: the board is a canvas, so
+    // without this an end-to-end check cannot tell whether a reloaded board
+    // still holds what was drawn. It exposes nothing the page does not already
+    // hold. Present only while the canvas is mounted (i.e. once loaded).
+    ;(window as unknown as { excalidrawAPI?: unknown }).excalidrawAPI = api
     console.log('[Whiteboard] Excalidraw API ready')
   }, [])
 
-  const canSave =
-    persistenceState.initialized &&
-    !persistenceState.saving &&
-    !!persistenceState.dirty
+  const canSave = canSaveGate(persistenceState) && !!persistenceState.dirty
 
   // ---- Status bar labels ---------------------------------------------------
   const docLabel = documentId.length > 20 ? `${documentId.slice(0, 20)}...` : documentId
   const userLabel = publicKey ? publicKey.slice(0, 8) + '...' : ''
 
-  const saveLabel = persistenceState.saving
+  const saveLabel = view === 'loading'
+    ? 'Loading…'
+    : view === 'failed'
+    ? 'Not loaded'
+    : persistenceState.saving
     ? 'Saving...'
     : persistenceState.dirty
     ? 'Save'
@@ -271,6 +294,28 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
       {/* Canvas area: flex:1 + min-height:0 lets Excalidraw fill without
           leaking outside the container. */}
       <div style={{ flex: 1, minHeight: 0 }}>
+        {view !== 'ready' ? (
+          // No canvas until the board has loaded: the binding is created when
+          // the canvas mounts and then shows what the board already holds; a
+          // failed load must read as an error, never a blank canvas.
+          <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+            {view === 'failed' ? (
+              <div role="alert" style={{
+                maxWidth: 480, padding: '1.5rem', textAlign: 'center',
+                border: '1px solid var(--cloistr-border)', borderRadius: 8,
+              }}>
+                <h2 style={{ margin: '0 0 0.75rem', fontSize: '1.15rem' }}>This board could not be opened</h2>
+                <p>
+                  Nothing has been changed or saved. The relay did not return the
+                  board{persistenceState.loadError ? ` (${persistenceState.loadError.message})` : ''}.
+                </p>
+                <button onClick={() => { void persistenceControls.load().catch(() => {}) }}>Retry</button>
+              </div>
+            ) : (
+              <p role="status">Loading board…</p>
+            )}
+          </div>
+        ) : (
         <Excalidraw
           excalidrawAPI={handleAPIReady}
           UIOptions={{
@@ -338,6 +383,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
             </WelcomeScreen.Center>
           </WelcomeScreen>
         </Excalidraw>
+        )}
       </div>
 
       {/*
@@ -382,6 +428,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ documentId, signer, publicKey, 
         </span>
         <button
           onClick={handleSave}
+          aria-label="Save board"
           disabled={!canSave}
           style={{
             flexShrink: 0,
